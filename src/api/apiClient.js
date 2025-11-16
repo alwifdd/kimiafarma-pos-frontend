@@ -2,7 +2,7 @@ import axios from "axios";
 
 // 1. Buat instance Axios dengan baseURL ke backend kita
 const apiClient = axios.create({
-  baseURL: ""https://kf-backend-api.vercel.app/api"", // <-- URL API backend Anda
+  baseURL: "https://kf-backend-api.vercel.app/api",
 });
 
 // 2. Buat Interceptor (Middleware untuk Frontend)
