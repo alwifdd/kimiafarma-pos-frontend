@@ -109,11 +109,14 @@ const SimpleOrderCard = ({ order }) => {
   const priceData = payload.price || {};
   const colorClass = STATUS_COLORS[order.status] || "bg-gray-100 text-gray-800";
 
-  // --- LOGIKA HARGA PINTAR ---
+  // --- LOGIKA HARGA PINTAR (ANTI-ZERO) ---
   let rawPrice =
     priceData.total || priceData.eaterPayment || priceData.subtotal || 0;
+
+  // Jika Grab Simulator kirim 0, kita hitung manual dari item
   if (rawPrice === 0 && items.length > 0) {
     rawPrice = items.reduce((sum, item) => {
+      // Harga default 15.000 jika item price juga 0 (kasus simulator parah)
       const itemPrice = item.price || 1500000;
       return sum + itemPrice * item.quantity;
     }, 0);
@@ -172,9 +175,10 @@ const PreparingOrderCard = ({ order, onMarkReady }) => {
   const items = payload.items || [];
   const priceData = payload.price || {};
 
-  // --- LOGIKA HARGA PINTAR ---
+  // --- LOGIKA HARGA PINTAR (ANTI-ZERO) ---
   let rawPrice =
     priceData.total || priceData.eaterPayment || priceData.subtotal || 0;
+
   if (rawPrice === 0 && items.length > 0) {
     rawPrice = items.reduce((sum, item) => {
       const itemPrice = item.price || 1500000;
@@ -240,7 +244,7 @@ const PreparingOrderCard = ({ order, onMarkReady }) => {
   );
 };
 
-// --- KOMPONEN FILTER (Tidak Berubah) ---
+// --- KOMPONEN FILTER ---
 const DashboardFilters = ({ user, onFilterChange }) => {
   const [bmList, setBmList] = useState([]);
   const [branchList, setBranchList] = useState([]);
@@ -440,6 +444,7 @@ const DashboardPage = () => {
     filtersRef.current = activeFilters;
   }, [activeFilters]);
 
+  // (FIX) Fetch Logic Stabil
   const fetchOrders = useCallback(
     async (filtersToFetch, showLoading = true) => {
       if (showLoading) setLoading(true);
