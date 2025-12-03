@@ -35,7 +35,17 @@ import {
   DialogTitle,
 } from "@mui/material";
 
-// --- DEFINISI VARIABEL ---
+// --- KONSTANTA GLOBAL ---
+const STATUS_COLORS = {
+  INCOMING: "bg-indigo-100 text-indigo-800",
+  PREPARING: "bg-yellow-100 text-yellow-800",
+  READY_FOR_PICKUP: "bg-blue-100 text-blue-800",
+  COLLECTED: "bg-purple-100 text-purple-800",
+  DELIVERED: "bg-green-100 text-green-800",
+  CANCELLED: "bg-red-100 text-red-800",
+  REJECTED: "bg-red-100 text-red-800",
+};
+
 const TAB_CONFIG = [
   { label: "All Order", apiKey: "ALL", color: "border-gray-600 text-gray-700" },
   {
@@ -70,61 +80,34 @@ const TAB_CONFIG = [
   },
 ];
 
-const cardColors = {
-  ALL: { bgColor: "bg-gray-100", textColor: "text-gray-700" },
-  INCOMING: { bgColor: "bg-indigo-100", textColor: "text-indigo-700" },
-  PREPARING: { bgColor: "bg-yellow-100", textColor: "text-yellow-700" },
-  READY_FOR_PICKUP: { bgColor: "bg-blue-100", textColor: "text-blue-700" },
-  COLLECTED: { bgColor: "bg-purple-100", textColor: "text-purple-700" },
-  DELIVERED: { bgColor: "bg-green-100", textColor: "text-green-700" },
-  CANCELLED: { bgColor: "bg-red-100", textColor: "text-red-800" },
-};
-
-const STATUS_COLORS = {
-  INCOMING: "bg-indigo-100 text-indigo-800",
-  PREPARING: "bg-yellow-100 text-yellow-800",
-  READY_FOR_PICKUP: "bg-blue-100 text-blue-800",
-  COLLECTED: "bg-purple-100 text-purple-800",
-  DELIVERED: "bg-green-100 text-green-800",
-  CANCELLED: "bg-red-100 text-red-800",
-  REJECTED: "bg-red-100 text-red-800",
-};
-
-// --- KOMPONEN STATUS CARD ---
-const StatusCard = ({ title, count, bgColor, textColor }) => {
-  return (
-    <div className={`p-4 rounded-lg ${bgColor}`}>
-      <p className={`text-sm font-medium ${textColor}`}>{title}</p>
-      <p className={`text-3xl font-bold mt-1 ${textColor}`}>{count}</p>
-    </div>
-  );
-};
-
-// ----------------------------------------------------------------------
-// 🔥 FIX 1: SIMPLE ORDER CARD (Untuk Delivered/Cancelled)
-// ----------------------------------------------------------------------
-const SimpleOrderCard = ({ order }) => {
+// --- HELPER LOGIKA HARGA ---
+const calculateDisplayTotal = (order) => {
   const payload = order.grab_payload_raw || {};
   const items = payload.items || [];
   const priceData = payload.price || {};
-  const colorClass = STATUS_COLORS[order.status] || "bg-gray-100 text-gray-800";
 
-  // --- LOGIKA HARGA PINTAR (ANTI-ZERO) ---
   let rawPrice =
     priceData.total || priceData.eaterPayment || priceData.subtotal || 0;
 
-  // Jika Grab Simulator kirim 0, kita hitung manual dari item
+  // Logic Anti-Zero untuk Simulator
   if (rawPrice === 0 && items.length > 0) {
     rawPrice = items.reduce((sum, item) => {
-      // Harga default 15.000 jika item price juga 0 (kasus simulator parah)
       const itemPrice = item.price || 1500000;
       return sum + itemPrice * item.quantity;
     }, 0);
   }
-  const displayTotal = rawPrice / 100;
+  return rawPrice / 100;
+};
 
-  // Display ID Pendek
-  const displayID = payload.shortOrderNumber || order.grab_order_id.slice(-6);
+// --- KOMPONEN KARTU INTERNAL ---
+
+const SimpleOrderCard = ({ order }) => {
+  const payload = order.grab_payload_raw || {};
+  const items = payload.items || [];
+  const colorClass = STATUS_COLORS[order.status] || "bg-gray-100 text-gray-800";
+  const displayTotal = calculateDisplayTotal(order);
+  const displayID =
+    payload.shortOrderNumber || order.grab_order_id?.slice(-6) || "ID";
 
   return (
     <div className="bg-white rounded-lg shadow overflow-hidden flex flex-col h-full border border-gray-200">
@@ -167,28 +150,12 @@ const SimpleOrderCard = ({ order }) => {
   );
 };
 
-// ----------------------------------------------------------------------
-// 🔥 FIX 2: PREPARING ORDER CARD (Untuk Status Preparing)
-// ----------------------------------------------------------------------
 const PreparingOrderCard = ({ order, onMarkReady }) => {
   const payload = order.grab_payload_raw || {};
   const items = payload.items || [];
-  const priceData = payload.price || {};
-
-  // --- LOGIKA HARGA PINTAR (ANTI-ZERO) ---
-  let rawPrice =
-    priceData.total || priceData.eaterPayment || priceData.subtotal || 0;
-
-  if (rawPrice === 0 && items.length > 0) {
-    rawPrice = items.reduce((sum, item) => {
-      const itemPrice = item.price || 1500000;
-      return sum + itemPrice * item.quantity;
-    }, 0);
-  }
-  const displayTotal = rawPrice / 100;
-
-  // Display ID Pendek
-  const displayID = payload.shortOrderNumber || order.grab_order_id.slice(-6);
+  const displayTotal = calculateDisplayTotal(order);
+  const displayID =
+    payload.shortOrderNumber || order.grab_order_id?.slice(-6) || "ID";
 
   return (
     <div className="bg-white rounded-lg shadow-lg overflow-hidden flex flex-col border-l-4 border-yellow-400">
@@ -244,7 +211,6 @@ const PreparingOrderCard = ({ order, onMarkReady }) => {
   );
 };
 
-// --- KOMPONEN FILTER ---
 const DashboardFilters = ({ user, onFilterChange }) => {
   const [bmList, setBmList] = useState([]);
   const [branchList, setBranchList] = useState([]);
@@ -259,7 +225,7 @@ const DashboardFilters = ({ user, onFilterChange }) => {
         setLoadingBMs(true);
         try {
           const bms = await getListBMs();
-          setBmList(bms);
+          setBmList(bms || []);
         } catch (err) {
           console.error(err);
         } finally {
@@ -269,7 +235,7 @@ const DashboardFilters = ({ user, onFilterChange }) => {
         setLoadingBranches(true);
         try {
           const branches = await getAllBranches();
-          setBranchList(branches);
+          setBranchList(branches || []);
         } catch (err) {
           console.error(err);
         } finally {
@@ -288,7 +254,7 @@ const DashboardFilters = ({ user, onFilterChange }) => {
       setLoadingBranches(true);
       try {
         const branches = await getBranchesByArea(newValue.area_kota);
-        setBranchList(branches);
+        setBranchList(branches || []);
       } catch (err) {
         console.error(err);
       } finally {
@@ -421,12 +387,17 @@ const DashboardFilters = ({ user, onFilterChange }) => {
 const DashboardPage = () => {
   const user = useMemo(() => getCurrentUser(), []);
   const [allOrders, setAllOrders] = useState([]);
-  const [incomingOrders, setIncomingOrders] = useState([]);
-  const [preparingOrders, setPreparingOrders] = useState([]);
-  const [readyForPickupOrders, setReadyForPickupOrders] = useState([]);
-  const [collectedOrders, setCollectedOrders] = useState([]);
-  const [deliveredOrders, setDeliveredOrders] = useState([]);
-  const [cancelledOrders, setCancelledOrders] = useState([]);
+
+  // State untuk data order per status
+  const [ordersByStatus, setOrdersByStatus] = useState({
+    INCOMING: [],
+    PREPARING: [],
+    READY_FOR_PICKUP: [],
+    COLLECTED: [],
+    DELIVERED: [],
+    CANCELLED: [], // Termasuk REJECTED
+  });
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("ALL");
@@ -444,26 +415,31 @@ const DashboardPage = () => {
     filtersRef.current = activeFilters;
   }, [activeFilters]);
 
-  // (FIX) Fetch Logic Stabil
+  const processOrderData = (data) => {
+    return {
+      INCOMING: data.filter((o) => o.status === "INCOMING"),
+      PREPARING: data.filter((o) => o.status === "PREPARING"),
+      READY_FOR_PICKUP: data.filter((o) => o.status === "READY_FOR_PICKUP"),
+      COLLECTED: data.filter((o) => o.status === "COLLECTED"),
+      DELIVERED: data.filter((o) => o.status === "DELIVERED"),
+      CANCELLED: data.filter(
+        (o) => o.status === "CANCELLED" || o.status === "REJECTED"
+      ),
+    };
+  };
+
   const fetchOrders = useCallback(
     async (filtersToFetch, showLoading = true) => {
       if (showLoading) setLoading(true);
       setError(null);
       try {
         const allData = await getAllOrders(filtersToFetch);
-        setAllOrders(allData);
-        setIncomingOrders(allData.filter((o) => o.status === "INCOMING"));
-        setPreparingOrders(allData.filter((o) => o.status === "PREPARING"));
-        setReadyForPickupOrders(
-          allData.filter((o) => o.status === "READY_FOR_PICKUP")
-        );
-        setCollectedOrders(allData.filter((o) => o.status === "COLLECTED"));
-        setDeliveredOrders(allData.filter((o) => o.status === "DELIVERED"));
-        setCancelledOrders(
-          allData.filter(
-            (o) => o.status === "CANCELLED" || o.status === "REJECTED"
-          )
-        );
+        if (Array.isArray(allData)) {
+          setAllOrders(allData);
+          setOrdersByStatus(processOrderData(allData));
+        } else {
+          setAllOrders([]);
+        }
       } catch (err) {
         setError("Gagal mengambil data pesanan.");
         console.error(err);
@@ -482,19 +458,10 @@ const DashboardPage = () => {
     const interval = setInterval(() => {
       getAllOrders(filtersRef.current)
         .then((allData) => {
-          setAllOrders(allData);
-          setIncomingOrders(allData.filter((o) => o.status === "INCOMING"));
-          setPreparingOrders(allData.filter((o) => o.status === "PREPARING"));
-          setReadyForPickupOrders(
-            allData.filter((o) => o.status === "READY_FOR_PICKUP")
-          );
-          setCollectedOrders(allData.filter((o) => o.status === "COLLECTED"));
-          setDeliveredOrders(allData.filter((o) => o.status === "DELIVERED"));
-          setCancelledOrders(
-            allData.filter(
-              (o) => o.status === "CANCELLED" || o.status === "REJECTED"
-            )
-          );
+          if (Array.isArray(allData)) {
+            setAllOrders(allData);
+            setOrdersByStatus(processOrderData(allData));
+          }
         })
         .catch((err) => console.error("Gagal refresh interval:", err));
     }, 30000);
@@ -512,85 +479,60 @@ const DashboardPage = () => {
     setErrorToast({ ...errorToast, open: false });
   };
 
-  const handleAccept = async (grabOrderId) => {
+  // Action Handlers
+  const executeAction = async (actionFn, id, successMsg, failMsg) => {
+    try {
+      await actionFn(id);
+      fetchOrders(activeFilters, false);
+    } catch (err) {
+      setErrorToast({ open: true, message: `${failMsg}: ${err.message}` });
+    }
+    handleCloseModal();
+  };
+
+  const handleAccept = (id) => {
     setModal({
       open: true,
       title: "Terima Pesanan?",
-      content: `Anda yakin ingin menerima pesanan ${grabOrderId}?`,
-      onConfirm: async () => {
-        try {
-          await acceptOrder(grabOrderId);
-          fetchOrders(activeFilters, false);
-        } catch (err) {
-          setErrorToast({ open: true, message: err.message });
-        }
-        handleCloseModal();
-      },
+      content: `Terima pesanan #${id.slice(-6)}?`,
+      onConfirm: () =>
+        executeAction(acceptOrder, id, "Pesanan diterima", "Gagal menerima"),
     });
   };
 
-  const handleReject = async (grabOrderId) => {
+  const handleReject = (id) => {
     setModal({
       open: true,
       title: "Tolak Pesanan?",
-      content: `Anda yakin ingin menolak pesanan ${grabOrderId}?`,
-      onConfirm: async () => {
-        try {
-          await rejectOrder(grabOrderId);
-          fetchOrders(activeFilters, false);
-        } catch (err) {
-          setErrorToast({ open: true, message: err.message });
-        }
-        handleCloseModal();
-      },
+      content: `Tolak pesanan #${id.slice(-6)}?`,
+      onConfirm: () =>
+        executeAction(rejectOrder, id, "Pesanan ditolak", "Gagal menolak"),
     });
   };
 
-  const handleMarkReady = async (grabOrderId) => {
+  const handleMarkReady = (id) => {
     setModal({
       open: true,
       title: "Tandai Siap?",
-      content: `Pesanan sudah selesai dibungkus dan siap dijemput driver?`,
-      onConfirm: async () => {
-        try {
-          await markOrderReady(grabOrderId);
-          fetchOrders(activeFilters, false);
-        } catch (err) {
-          setErrorToast({ open: true, message: err.message });
-        }
-        handleCloseModal();
-      },
+      content: `Pesanan #${id.slice(-6)} siap dijemput?`,
+      onConfirm: () =>
+        executeAction(
+          markOrderReady,
+          id,
+          "Pesanan siap",
+          "Gagal update status"
+        ),
     });
   };
 
-  const ordersByTab = {
-    ALL: allOrders,
-    INCOMING: incomingOrders,
-    PREPARING: preparingOrders,
-    READY_FOR_PICKUP: readyForPickupOrders,
-    COLLECTED: collectedOrders,
-    DELIVERED: deliveredOrders,
-    CANCELLED: cancelledOrders,
-  };
-  const displayedOrders = useMemo(
-    () => ordersByTab[activeTab] || [],
-    [
-      activeTab,
-      allOrders,
-      incomingOrders,
-      preparingOrders,
-      readyForPickupOrders,
-      collectedOrders,
-      deliveredOrders,
-      cancelledOrders,
-    ]
-  );
+  // Display Logic
+  const ordersToDisplay =
+    activeTab === "ALL" ? allOrders : ordersByStatus[activeTab] || [];
 
-  const getTabClass = (tabConfig) => {
-    return activeTab === tabConfig.apiKey
-      ? `pb-2 border-b-2 font-semibold ${tabConfig.color}`
+  const getTabClass = (tab) =>
+    activeTab === tab.apiKey
+      ? `pb-2 border-b-2 font-semibold ${tab.color}`
       : "pb-2 border-b-2 border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700";
-  };
 
   const totalRevenue = useMemo(() => {
     return new Intl.NumberFormat("id-ID", {
@@ -598,21 +540,12 @@ const DashboardPage = () => {
       currency: "IDR",
       minimumFractionDigits: 0,
     }).format(
-      deliveredOrders.reduce((acc, order) => {
-        let rawPrice =
-          order.grab_payload_raw?.price?.total ||
-          order.grab_payload_raw?.price?.eaterPayment ||
-          0;
-        if (rawPrice === 0 && order.grab_payload_raw?.items) {
-          rawPrice = order.grab_payload_raw.items.reduce(
-            (sum, item) => sum + (item.price || 1500000) * item.quantity,
-            0
-          );
-        }
-        return acc + rawPrice / 100;
-      }, 0)
+      ordersByStatus.DELIVERED.reduce(
+        (acc, order) => acc + calculateDisplayTotal(order),
+        0
+      )
     );
-  }, [deliveredOrders]);
+  }, [ordersByStatus.DELIVERED]);
 
   return (
     <div className="p-6 min-h-full">
@@ -639,7 +572,7 @@ const DashboardPage = () => {
           />
           <OverviewStatCard
             title="Completed"
-            value={deliveredOrders.length}
+            value={ordersByStatus.DELIVERED.length}
             detail="Orders"
             iconBgColor="bg-purple-100"
             iconColor="text-purple-600"
@@ -647,7 +580,10 @@ const DashboardPage = () => {
           />
           <OverviewStatCard
             title="Active"
-            value={preparingOrders.length + readyForPickupOrders.length}
+            value={
+              ordersByStatus.PREPARING.length +
+              ordersByStatus.READY_FOR_PICKUP.length
+            }
             detail="In Progress"
             iconBgColor="bg-orange-100"
             iconColor="text-orange-600"
@@ -671,7 +607,11 @@ const DashboardPage = () => {
                 tab
               )}`}
             >
-              {tab.label} ({ordersByTab[tab.apiKey]?.length || 0})
+              {tab.label} (
+              {tab.apiKey === "ALL"
+                ? allOrders.length
+                : ordersByStatus[tab.apiKey]?.length || 0}
+              )
             </button>
           ))}
         </nav>
@@ -683,36 +623,35 @@ const DashboardPage = () => {
             <CircularProgress size={60} />
           </div>
         )}
-        {!loading && displayedOrders.length === 0 && (
+        {!loading && ordersToDisplay.length === 0 && (
           <p className="text-gray-500 text-center py-10">Tidak ada pesanan.</p>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {!loading &&
-            activeTab === "INCOMING" &&
-            displayedOrders.map((order, i) => (
-              <OrderCard
-                key={order.grab_order_id || i}
-                order={order}
-                onAccept={handleAccept}
-                onReject={handleReject}
-              />
-            ))}
-          {!loading &&
-            activeTab === "PREPARING" &&
-            displayedOrders.map((order, i) => (
-              <PreparingOrderCard
-                key={order.grab_order_id || i}
-                order={order}
-                onMarkReady={handleMarkReady}
-              />
-            ))}
-          {!loading &&
-            activeTab !== "INCOMING" &&
-            activeTab !== "PREPARING" &&
-            displayedOrders.map((order, i) => (
-              <SimpleOrderCard key={order.grab_order_id || i} order={order} />
-            ))}
+            ordersToDisplay.map((order, i) => {
+              const key = order.grab_order_id || i;
+              if (activeTab === "INCOMING" || order.status === "INCOMING") {
+                return (
+                  <OrderCard
+                    key={key}
+                    order={order}
+                    onAccept={handleAccept}
+                    onReject={handleReject}
+                  />
+                );
+              }
+              if (activeTab === "PREPARING" || order.status === "PREPARING") {
+                return (
+                  <PreparingOrderCard
+                    key={key}
+                    order={order}
+                    onMarkReady={handleMarkReady}
+                  />
+                );
+              }
+              return <SimpleOrderCard key={key} order={order} />;
+            })}
         </div>
       </section>
 
