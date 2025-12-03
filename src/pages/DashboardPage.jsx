@@ -21,7 +21,15 @@ import { getCurrentUser } from "../api/authService";
 
 import OrderCard from "../components/common/OrderCard";
 import OverviewStatCard from "../components/common/OverviewStatCard";
-import { FaWallet, FaBox, FaCheckCircle, FaSpinner } from "react-icons/fa";
+// Tambah FaTimesCircle untuk ikon Cancel
+import {
+  FaWallet,
+  FaBox,
+  FaCheckCircle,
+  FaSpinner,
+  FaTimesCircle,
+  FaDownload,
+} from "react-icons/fa";
 
 import Autocomplete from "@mui/material/Autocomplete";
 import TextField from "@mui/material/TextField";
@@ -35,17 +43,7 @@ import {
   DialogTitle,
 } from "@mui/material";
 
-// --- KONSTANTA GLOBAL ---
-const STATUS_COLORS = {
-  INCOMING: "bg-indigo-100 text-indigo-800",
-  PREPARING: "bg-yellow-100 text-yellow-800",
-  READY_FOR_PICKUP: "bg-blue-100 text-blue-800",
-  COLLECTED: "bg-purple-100 text-purple-800",
-  DELIVERED: "bg-green-100 text-green-800",
-  CANCELLED: "bg-red-100 text-red-800",
-  REJECTED: "bg-red-100 text-red-800",
-};
-
+// --- DEFINISI VARIABEL ---
 const TAB_CONFIG = [
   { label: "All Order", apiKey: "ALL", color: "border-gray-600 text-gray-700" },
   {
@@ -80,6 +78,16 @@ const TAB_CONFIG = [
   },
 ];
 
+const STATUS_COLORS = {
+  INCOMING: "bg-indigo-100 text-indigo-800",
+  PREPARING: "bg-yellow-100 text-yellow-800",
+  READY_FOR_PICKUP: "bg-blue-100 text-blue-800",
+  COLLECTED: "bg-purple-100 text-purple-800",
+  DELIVERED: "bg-green-100 text-green-800",
+  CANCELLED: "bg-red-100 text-red-800",
+  REJECTED: "bg-red-100 text-red-800",
+};
+
 // --- HELPER LOGIKA HARGA ---
 const calculateDisplayTotal = (order) => {
   const payload = order.grab_payload_raw || {};
@@ -89,7 +97,6 @@ const calculateDisplayTotal = (order) => {
   let rawPrice =
     priceData.total || priceData.eaterPayment || priceData.subtotal || 0;
 
-  // Logic Anti-Zero untuk Simulator
   if (rawPrice === 0 && items.length > 0) {
     rawPrice = items.reduce((sum, item) => {
       const itemPrice = item.price || 1500000;
@@ -99,8 +106,7 @@ const calculateDisplayTotal = (order) => {
   return rawPrice / 100;
 };
 
-// --- KOMPONEN KARTU INTERNAL ---
-
+// --- KOMPONEN KARTU ---
 const SimpleOrderCard = ({ order }) => {
   const payload = order.grab_payload_raw || {};
   const items = payload.items || [];
@@ -110,7 +116,7 @@ const SimpleOrderCard = ({ order }) => {
     payload.shortOrderNumber || order.grab_order_id?.slice(-6) || "ID";
 
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden flex flex-col h-full border border-gray-200">
+    <div className="bg-white rounded-lg shadow overflow-hidden flex flex-col h-full border border-gray-200 hover:shadow-md transition-shadow">
       <div className="p-5 border-b border-gray-200">
         <h3 className="text-lg font-bold text-gray-800 break-words">
           #{displayID}
@@ -143,6 +149,7 @@ const SimpleOrderCard = ({ order }) => {
             style: "currency",
             currency: "IDR",
             minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
           }).format(displayTotal)}
         </p>
       </div>
@@ -197,6 +204,7 @@ const PreparingOrderCard = ({ order, onMarkReady }) => {
               style: "currency",
               currency: "IDR",
               minimumFractionDigits: 0,
+              maximumFractionDigits: 0,
             }).format(displayTotal)}
           </p>
         </div>
@@ -211,6 +219,7 @@ const PreparingOrderCard = ({ order, onMarkReady }) => {
   );
 };
 
+// --- KOMPONEN FILTER ---
 const DashboardFilters = ({ user, onFilterChange }) => {
   const [bmList, setBmList] = useState([]);
   const [branchList, setBranchList] = useState([]);
@@ -388,14 +397,13 @@ const DashboardPage = () => {
   const user = useMemo(() => getCurrentUser(), []);
   const [allOrders, setAllOrders] = useState([]);
 
-  // State untuk data order per status
   const [ordersByStatus, setOrdersByStatus] = useState({
     INCOMING: [],
     PREPARING: [],
     READY_FOR_PICKUP: [],
     COLLECTED: [],
     DELIVERED: [],
-    CANCELLED: [], // Termasuk REJECTED
+    CANCELLED: [],
   });
 
   const [loading, setLoading] = useState(true);
@@ -422,6 +430,7 @@ const DashboardPage = () => {
       READY_FOR_PICKUP: data.filter((o) => o.status === "READY_FOR_PICKUP"),
       COLLECTED: data.filter((o) => o.status === "COLLECTED"),
       DELIVERED: data.filter((o) => o.status === "DELIVERED"),
+      // Gabungkan CANCELLED dan REJECTED di satu tempat
       CANCELLED: data.filter(
         (o) => o.status === "CANCELLED" || o.status === "REJECTED"
       ),
@@ -525,39 +534,109 @@ const DashboardPage = () => {
     });
   };
 
-  // Display Logic
+  // --- CSV DOWNLOAD ---
+  const handleDownloadCSV = () => {
+    // Ambil data sesuai tab yang aktif
+    const ordersToExport =
+      activeTab === "ALL" ? allOrders : ordersByStatus[activeTab] || [];
+
+    if (ordersToExport.length === 0) {
+      setErrorToast({
+        open: true,
+        message: "Tidak ada data untuk di-download.",
+      });
+      return;
+    }
+
+    const headers = ["Order ID", "Status", "Total", "Tanggal", "Items"];
+    const rows = ordersToExport.map((order) => {
+      const id =
+        order.grab_payload_raw?.shortOrderNumber || order.grab_order_id;
+      const status = order.status;
+      const total = calculateDisplayTotal(order);
+      const date = new Date(order.created_at).toLocaleString("id-ID");
+      const items = (order.grab_payload_raw?.items || [])
+        .map((i) => `${i.quantity}x ${i.name || "Item"}`)
+        .join("; ");
+
+      return [id, status, total, `"${date}"`, `"${items}"`].join(",");
+    });
+
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute(
+      "download",
+      `Report_Grab_${activeTab}_${new Date().toISOString().slice(0, 10)}.csv`
+    );
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const ordersToDisplay =
     activeTab === "ALL" ? allOrders : ordersByStatus[activeTab] || [];
-
   const getTabClass = (tab) =>
     activeTab === tab.apiKey
       ? `pb-2 border-b-2 font-semibold ${tab.color}`
       : "pb-2 border-b-2 border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700";
 
+  // FIX: Total Revenue Bulat
   const totalRevenue = useMemo(() => {
+    const rawTotal = ordersByStatus.DELIVERED.reduce((acc, order) => {
+      let orderRaw =
+        order.grab_payload_raw?.price?.total ||
+        order.grab_payload_raw?.price?.eaterPayment ||
+        0;
+      if (orderRaw === 0 && order.grab_payload_raw?.items) {
+        orderRaw = order.grab_payload_raw.items.reduce(
+          (sum, item) => sum + (item.price || 1500000) * item.quantity,
+          0
+        );
+      }
+      return acc + orderRaw;
+    }, 0);
+
+    // Bagi 100 di akhir dan bulatkan ke bawah
+    const totalRupiah = Math.floor(rawTotal / 100);
     return new Intl.NumberFormat("id-ID", {
       style: "currency",
       currency: "IDR",
       minimumFractionDigits: 0,
-    }).format(
-      ordersByStatus.DELIVERED.reduce(
-        (acc, order) => acc + calculateDisplayTotal(order),
-        0
-      )
-    );
+      maximumFractionDigits: 0,
+    }).format(totalRupiah);
   }, [ordersByStatus.DELIVERED]);
 
   return (
     <div className="p-6 min-h-full">
       <section className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-4">
-          Dashboard Overview
-        </h1>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">
+              Dashboard Overview
+            </h1>
+            <p className="text-gray-500 text-sm">
+              Ringkasan penjualan hari ini
+            </p>
+          </div>
+          {/* TOMBOL DOWNLOAD */}
+          <button
+            onClick={handleDownloadCSV}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow hover:bg-indigo-700 transition-colors"
+          >
+            <FaDownload /> Download Report
+          </button>
+        </div>
+
+        {/* --- STATISTIK LENGKAP (5 KOLOM) --- */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           <OverviewStatCard
             title="Total Revenue"
             value={totalRevenue}
-            detail="Completed Orders"
+            detail="Completed"
             iconBgColor="bg-green-100"
             iconColor="text-green-600"
             icon={<FaWallet />}
@@ -588,6 +667,15 @@ const DashboardPage = () => {
             iconBgColor="bg-orange-100"
             iconColor="text-orange-600"
             icon={<FaSpinner />}
+          />
+          {/* KARTU BARU: CANCELLED */}
+          <OverviewStatCard
+            title="Cancelled"
+            value={ordersByStatus.CANCELLED.length}
+            detail="Rejected/Void"
+            iconBgColor="bg-red-100"
+            iconColor="text-red-600"
+            icon={<FaTimesCircle />}
           />
         </div>
       </section>
