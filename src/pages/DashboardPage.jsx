@@ -1,3 +1,4 @@
+// src/pages/DashboardPage.jsx
 import React, {
   useState,
   useEffect,
@@ -5,31 +6,26 @@ import React, {
   useMemo,
   useRef,
 } from "react";
-// (UPDATE) Impor service yang baru dan yang diubah
 import {
-  getAllOrders, // <-- Service ini sudah di-upgrade
-  // getOrdersByStatus, // <-- Dihapus, kita filter di frontend
+  getAllOrders,
   acceptOrder,
   rejectOrder,
   markOrderReady,
 } from "../api/orderService";
 import {
-  getAllBranches, // <-- (BARU) Untuk filter BM
-  getListBMs, // <-- (BARU) Untuk filter Superadmin
-  getBranchesByArea, // <-- (BARU) Untuk filter Superadmin
+  getAllBranches,
+  getListBMs,
+  getBranchesByArea,
 } from "../api/branchService";
-import { getCurrentUser } from "../api/authService"; // <-- (BARU) Untuk cek role
+import { getCurrentUser } from "../api/authService";
 
 import OrderCard from "../components/common/OrderCard";
 import OverviewStatCard from "../components/common/OverviewStatCard";
-// Impor ikon-ikon
 import { FaWallet, FaBox, FaCheckCircle, FaSpinner } from "react-icons/fa";
 
-// (BARU) Impor komponen filter dari MUI (seperti di ProductsPage)
 import Autocomplete from "@mui/material/Autocomplete";
 import TextField from "@mui/material/TextField";
 import CircularProgress from "@mui/material/CircularProgress";
-// (FIX) Impor komponen Modal pengganti alert/confirm
 import {
   Button,
   Dialog,
@@ -39,7 +35,7 @@ import {
   DialogTitle,
 } from "@mui/material";
 
-// --- DEFINISI VARIABEL (Tidak Berubah) ---
+// --- DEFINISI VARIABEL ---
 const TAB_CONFIG = [
   { label: "All Order", apiKey: "ALL", color: "border-gray-600 text-gray-700" },
   {
@@ -94,7 +90,7 @@ const STATUS_COLORS = {
   REJECTED: "bg-red-100 text-red-800",
 };
 
-// --- KOMPONEN INTERNAL (Tidak Berubah) ---
+// --- KOMPONEN STATUS CARD ---
 const StatusCard = ({ title, count, bgColor, textColor }) => {
   return (
     <div className={`p-4 rounded-lg ${bgColor}`}>
@@ -104,117 +100,155 @@ const StatusCard = ({ title, count, bgColor, textColor }) => {
   );
 };
 
+// ----------------------------------------------------------------------
+// 🔥 FIX 1: SIMPLE ORDER CARD (Untuk Delivered/Cancelled)
+// ----------------------------------------------------------------------
 const SimpleOrderCard = ({ order }) => {
-  const items = order.grab_payload_raw?.items || [];
+  const payload = order.grab_payload_raw || {};
+  const items = payload.items || [];
+  const priceData = payload.price || {};
   const colorClass = STATUS_COLORS[order.status] || "bg-gray-100 text-gray-800";
-  const orderTotal = order.grab_payload_raw?.price?.total || 0;
+
+  // --- LOGIKA HARGA PINTAR ---
+  let rawPrice =
+    priceData.total || priceData.eaterPayment || priceData.subtotal || 0;
+  if (rawPrice === 0 && items.length > 0) {
+    rawPrice = items.reduce((sum, item) => {
+      const itemPrice = item.price || 1500000;
+      return sum + itemPrice * item.quantity;
+    }, 0);
+  }
+  const displayTotal = rawPrice / 100;
+
+  // Display ID Pendek
+  const displayID = payload.shortOrderNumber || order.grab_order_id.slice(-6);
 
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden flex flex-col">
+    <div className="bg-white rounded-lg shadow overflow-hidden flex flex-col h-full border border-gray-200">
       <div className="p-5 border-b border-gray-200">
         <h3 className="text-lg font-bold text-gray-800 break-words">
-          Order: {order.grab_order_id}
+          #{displayID}
         </h3>
-        <p className="text-sm text-gray-500">
-          Masuk: {new Date(order.created_at).toLocaleString()}
+        <p className="text-xs text-gray-500 mt-1">
+          {new Date(order.created_at).toLocaleString("id-ID")}
         </p>
         <span
-          className={`mt-2 inline-block text-xs font-medium px-2.5 py-0.5 rounded-full ${colorClass}`}
+          className={`mt-2 inline-block text-xs font-bold px-2.5 py-1 rounded-full ${colorClass}`}
         >
-          {order.status}
+          {order.status.replace(/_/g, " ")}
         </span>
       </div>
-      <div className="p-5 h-36 overflow-y-auto flex-grow">
-        <h4 className="font-semibold mb-2 text-gray-700">Detail Item:</h4>
-        <ul className="list-disc pl-5 space-y-2 text-gray-800 text-sm">
+      <div className="p-5 h-36 overflow-y-auto flex-grow bg-gray-50/50">
+        <ul className="space-y-2 text-gray-800 text-sm">
           {items.map((item, index) => (
-            <li key={index}>
-              <span className="font-medium">{item.quantity}x</span> {item.name}
+            <li key={index} className="flex gap-2">
+              <span className="font-bold bg-white px-2 rounded border border-gray-200 h-fit">
+                {item.quantity}x
+              </span>
+              <span>{item.name || `Item Simulator #${index + 1}`}</span>
             </li>
           ))}
         </ul>
       </div>
-      <div className="p-5 border-t border-gray-200 bg-gray-50">
-        <p className="text-sm text-gray-500">Total</p>
-        <p className="text-2xl font-bold text-gray-900">
+      <div className="p-5 border-t border-gray-200 bg-white">
+        <p className="text-xs text-gray-500 uppercase font-bold">Total</p>
+        <p className="text-xl font-extrabold text-gray-900">
           {new Intl.NumberFormat("id-ID", {
             style: "currency",
             currency: "IDR",
             minimumFractionDigits: 0,
-          }).format(orderTotal)}
+          }).format(displayTotal)}
         </p>
       </div>
     </div>
   );
 };
 
+// ----------------------------------------------------------------------
+// 🔥 FIX 2: PREPARING ORDER CARD (Untuk Status Preparing)
+// ----------------------------------------------------------------------
 const PreparingOrderCard = ({ order, onMarkReady }) => {
-  const items = order.grab_payload_raw?.items || [];
-  const orderTotal = order.grab_payload_raw?.price?.total || 0;
+  const payload = order.grab_payload_raw || {};
+  const items = payload.items || [];
+  const priceData = payload.price || {};
+
+  // --- LOGIKA HARGA PINTAR ---
+  let rawPrice =
+    priceData.total || priceData.eaterPayment || priceData.subtotal || 0;
+  if (rawPrice === 0 && items.length > 0) {
+    rawPrice = items.reduce((sum, item) => {
+      const itemPrice = item.price || 1500000;
+      return sum + itemPrice * item.quantity;
+    }, 0);
+  }
+  const displayTotal = rawPrice / 100;
+
+  // Display ID Pendek
+  const displayID = payload.shortOrderNumber || order.grab_order_id.slice(-6);
 
   return (
-    <div className="bg-white rounded-lg shadow-lg overflow-hidden flex flex-col">
+    <div className="bg-white rounded-lg shadow-lg overflow-hidden flex flex-col border-l-4 border-yellow-400">
       <div className="p-5 border-b border-gray-200">
-        <h3 className="text-lg font-bold text-gray-800 break-words">
-          Order: {order.grab_order_id}
-        </h3>
-        <p className="text-sm text-gray-500">
-          Masuk: {new Date(order.created_at).toLocaleString()}
-        </p>
-        <span className="mt-2 inline-block text-xs font-medium px-2.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800">
-          {order.status}
-        </span>
+        <div className="flex justify-between items-start">
+          <div>
+            <h3 className="text-xl font-bold text-gray-900">#{displayID}</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              {new Date(order.created_at).toLocaleString("id-ID")}
+            </p>
+          </div>
+          <span className="inline-block text-xs font-bold px-3 py-1 rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">
+            SEDANG DISIAPKAN
+          </span>
+        </div>
       </div>
-      <div className="p-5 h-48 overflow-y-auto flex-grow">
-        <h4 className="font-semibold mb-2 text-gray-700">Detail Item:</h4>
-        <ul className="list-disc pl-5 space-y-2 text-gray-800 text-sm">
+      <div className="p-5 h-48 overflow-y-auto flex-grow bg-yellow-50/30">
+        <h4 className="text-xs font-bold text-gray-500 uppercase mb-3">
+          Detail Item:
+        </h4>
+        <ul className="space-y-3 text-gray-800 text-sm">
           {items.map((item, index) => (
-            <li key={index}>
-              <span className="font-medium">{item.quantity}x</span> {item.name}
+            <li key={index} className="flex gap-3 items-start">
+              <span className="font-bold bg-white px-2 py-1 rounded border border-gray-200 shadow-sm">
+                {item.quantity}x
+              </span>
+              <span className="font-medium pt-1">
+                {item.name || `Item Simulator #${index + 1}`}
+              </span>
             </li>
           ))}
         </ul>
       </div>
-      <div className="p-4 bg-gray-50 border-t border-gray-200 space-y-3">
-        <div>
-          <p className="text-sm text-gray-500">Total</p>
-          <p className="text-2xl font-bold text-gray-900">
+      <div className="p-4 bg-white border-t border-gray-200 space-y-3">
+        <div className="flex justify-between items-center">
+          <p className="text-sm font-medium text-gray-500">Total</p>
+          <p className="text-xl font-extrabold text-gray-900">
             {new Intl.NumberFormat("id-ID", {
               style: "currency",
               currency: "IDR",
               minimumFractionDigits: 0,
-            }).format(orderTotal)}
+            }).format(displayTotal)}
           </p>
         </div>
         <button
           onClick={() => onMarkReady(order.grab_order_id)}
-          className="w-full px-4 py-3 font-semibold text-sm text-white bg-blue-600 rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          className="w-full px-4 py-3 font-bold text-sm text-white bg-blue-600 rounded-lg shadow-md hover:bg-blue-700 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all"
         >
-          Siap Dijemput
+          ✅ Tandai Siap Dijemput
         </button>
       </div>
     </div>
   );
 };
 
-/* =====================================================
-  (BARU) KOMPONEN INTERNAL UNTUK FILTER DROPDOWN
-=====================================================
-*/
+// --- KOMPONEN FILTER ---
 const DashboardFilters = ({ user, onFilterChange }) => {
-  // State untuk data dropdown
   const [bmList, setBmList] = useState([]);
   const [branchList, setBranchList] = useState([]);
-
-  // State untuk nilai yang dipilih
   const [selectedBM, setSelectedBM] = useState(null);
   const [selectedBranch, setSelectedBranch] = useState(null);
-
-  // State loading untuk dropdown
   const [loadingBMs, setLoadingBMs] = useState(false);
   const [loadingBranches, setLoadingBranches] = useState(false);
 
-  // Efek untuk memuat data dropdown saat komponen pertama kali muncul
   useEffect(() => {
     const loadFilterData = async () => {
       if (user.role === "superadmin") {
@@ -223,17 +257,17 @@ const DashboardFilters = ({ user, onFilterChange }) => {
           const bms = await getListBMs();
           setBmList(bms);
         } catch (err) {
-          console.error("Gagal memuat daftar BM:", err);
+          console.error(err);
         } finally {
           setLoadingBMs(false);
         }
       } else if (user.role === "bisnis_manager") {
         setLoadingBranches(true);
         try {
-          const branches = await getAllBranches(); // API ini otomatis filter by area BM
+          const branches = await getAllBranches();
           setBranchList(branches);
         } catch (err) {
-          console.error("Gagal memuat daftar cabang BM:", err);
+          console.error(err);
         } finally {
           setLoadingBranches(false);
         }
@@ -242,66 +276,49 @@ const DashboardFilters = ({ user, onFilterChange }) => {
     loadFilterData();
   }, [user.role]);
 
-  // Handler untuk Superadmin: saat memilih BM
   const handleBMChange = async (event, newValue) => {
     setSelectedBM(newValue);
-    setSelectedBranch(null); // Reset pilihan cabang
-    setBranchList([]); // Kosongkan daftar cabang
-
+    setSelectedBranch(null);
+    setBranchList([]);
     if (newValue) {
-      // Jika BM dipilih, ambil cabang di areanya
       setLoadingBranches(true);
       try {
         const branches = await getBranchesByArea(newValue.area_kota);
         setBranchList(branches);
       } catch (err) {
-        console.error("Gagal memuat cabang berdasarkan area:", err);
+        console.error(err);
       } finally {
         setLoadingBranches(false);
       }
-      // Kirim filter ke parent (berdasarkan area BM)
       onFilterChange({ filter_area_kota: newValue.area_kota });
     } else {
-      // Jika BM di-reset, kirim filter kosong
       onFilterChange({});
     }
   };
 
-  // Handler untuk Superadmin/BM: saat memilih Cabang
   const handleBranchChange = (event, newValue) => {
     setSelectedBranch(newValue);
-
     if (newValue) {
-      // Jika cabang dipilih, filter berdasarkan ID cabang
       onFilterChange({ filter_branch_id: newValue.branch_id });
     } else {
-      // Jika cabang di-reset:
       if (user.role === "superadmin" && selectedBM) {
-        // Superadmin: kembali ke filter area BM
         onFilterChange({ filter_area_kota: selectedBM.area_kota });
       } else {
-        // BM atau Superadmin (tanpa BM): kembali ke filter default (kosong)
         onFilterChange({});
       }
     }
   };
 
-  // --- Render Tampilan Filter ---
-  if (user.role === "admin_cabang") {
-    return null; // Admin cabang tidak bisa filter
-  }
+  if (user.role === "admin_cabang") return null;
 
   return (
     <div className="mb-6 bg-white p-4 rounded-lg shadow-lg flex flex-wrap gap-4 items-center">
       <h2 className="text-lg font-semibold text-gray-800 shrink-0">
         Filter Data:
       </h2>
-
-      {/* === FILTER SUPER ADMIN === */}
       {user.role === "superadmin" && (
         <>
           <Autocomplete
-            id="bm-select"
             options={bmList}
             loading={loadingBMs}
             value={selectedBM}
@@ -329,14 +346,12 @@ const DashboardFilters = ({ user, onFilterChange }) => {
             style={{ minWidth: "300px" }}
           />
           <Autocomplete
-            id="branch-select-sa"
             options={branchList}
             loading={loadingBranches}
             value={selectedBranch}
             onChange={handleBranchChange}
-            disabled={!selectedBM} // <-- Hanya aktif jika BM sudah dipilih
+            disabled={!selectedBM}
             getOptionLabel={(option) =>
-              // (FIX) Menambahkan kota
               `${option.branch_name} - ${option.kota} (ID: ${option.branch_id})`
             }
             isOptionEqualToValue={(option, value) =>
@@ -362,17 +377,13 @@ const DashboardFilters = ({ user, onFilterChange }) => {
           />
         </>
       )}
-
-      {/* === FILTER BISNIS MANAGER === */}
       {user.role === "bisnis_manager" && (
         <Autocomplete
-          id="branch-select-bm"
           options={branchList}
           loading={loadingBranches}
           value={selectedBranch}
           onChange={handleBranchChange}
           getOptionLabel={(option) =>
-            // (FIX) Menambahkan kota, sama seperti di ProductsPage
             `${option.branch_name} - ${option.kota} (ID: ${option.branch_id})`
           }
           isOptionEqualToValue={(option, value) =>
@@ -402,12 +413,9 @@ const DashboardFilters = ({ user, onFilterChange }) => {
   );
 };
 
-// --- KOMPONEN UTAMA ---
+// --- KOMPONEN UTAMA DASHBOARD ---
 const DashboardPage = () => {
-  // (BARU) Ambil data user, bungkus dengan useMemo agar tidak re-render
   const user = useMemo(() => getCurrentUser(), []);
-
-  // --- (UPDATE) States ---
   const [allOrders, setAllOrders] = useState([]);
   const [incomingOrders, setIncomingOrders] = useState([]);
   const [preparingOrders, setPreparingOrders] = useState([]);
@@ -415,48 +423,29 @@ const DashboardPage = () => {
   const [collectedOrders, setCollectedOrders] = useState([]);
   const [deliveredOrders, setDeliveredOrders] = useState([]);
   const [cancelledOrders, setCancelledOrders] = useState([]);
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("ALL");
-
-  // (BARU) State untuk menyimpan filter yang dipilih
   const [activeFilters, setActiveFilters] = useState({});
-
-  // (FIX) State untuk Modal Konfirmasi (menggantikan alert/confirm)
   const [modal, setModal] = useState({
     open: false,
     title: "",
     content: "",
     onConfirm: () => {},
   });
-
-  // (FIX) State untuk Notifikasi Error (menggantikan alert)
   const [errorToast, setErrorToast] = useState({ open: false, message: "" });
 
-  /* =====================================================
-    (FIX) LOGIKA BARU PENGAMBILAN DATA (FIX BUG FILTER)
-  =====================================================
-  */
-
-  // (FIX) Gunakan ref untuk menyimpan filter terbaru untuk interval
-  // Ini memastikan interval selalu mendapat filter terbaru tanpa trigger re-render
   const filtersRef = useRef(activeFilters);
   useEffect(() => {
     filtersRef.current = activeFilters;
   }, [activeFilters]);
 
-  // (FIX) Buat fungsi fetchOrders yang stabil (tanpa dependensi)
-  // Ini akan dipanggil oleh interval dan oleh filter change
   const fetchOrders = useCallback(
     async (filtersToFetch, showLoading = true) => {
-      if (showLoading) {
-        setLoading(true); // Hanya set loading jika dipicu manual (bukan interval)
-      }
+      if (showLoading) setLoading(true);
       setError(null);
       try {
         const allData = await getAllOrders(filtersToFetch);
-
         setAllOrders(allData);
         setIncomingOrders(allData.filter((o) => o.status === "INCOMING"));
         setPreparingOrders(allData.filter((o) => o.status === "PREPARING"));
@@ -465,7 +454,6 @@ const DashboardPage = () => {
         );
         setCollectedOrders(allData.filter((o) => o.status === "COLLECTED"));
         setDeliveredOrders(allData.filter((o) => o.status === "DELIVERED"));
-        // (FIX) Gabungkan CANCELLED dan REJECTED
         setCancelledOrders(
           allData.filter(
             (o) => o.status === "CANCELLED" || o.status === "REJECTED"
@@ -475,28 +463,18 @@ const DashboardPage = () => {
         setError("Gagal mengambil data pesanan.");
         console.error(err);
       } finally {
-        if (showLoading) {
-          setLoading(false);
-        }
+        if (showLoading) setLoading(false);
       }
     },
     []
-  ); // <-- Dependensi kosong, fungsi ini stabil
+  );
 
-  // (FIX) Buat Effect terpisah untuk memanggil data saat filter berubah
   useEffect(() => {
-    console.log("Filter berubah, memuat ulang data:", activeFilters);
-    fetchOrders(activeFilters, true); // true = tunjukkan loading spinner
-  }, [activeFilters, fetchOrders]); // <-- Akan jalan saat activeFilters berubah
+    fetchOrders(activeFilters, true);
+  }, [activeFilters, fetchOrders]);
 
-  // (FIX) Buat Effect terpisah untuk interval (hanya jalan sekali)
   useEffect(() => {
     const interval = setInterval(() => {
-      console.log(
-        "Interval refresh, fetching dengan filter:",
-        filtersRef.current
-      );
-      // Panggil API di background tanpa set loading (showLoading = false)
       getAllOrders(filtersRef.current)
         .then((allData) => {
           setAllOrders(allData);
@@ -513,34 +491,19 @@ const DashboardPage = () => {
             )
           );
         })
-        .catch((err) => {
-          console.error("Gagal refresh interval:", err);
-          // Tampilkan error toast jika gagal refresh
-          setErrorToast({
-            open: true,
-            message: "Gagal refresh data otomatis.",
-          });
-        });
-    }, 30000); // refresh tiap 30 detik
-
+        .catch((err) => console.error("Gagal refresh interval:", err));
+    }, 30000);
     return () => clearInterval(interval);
-  }, []); // <-- Dependensi kosong, hanya jalan sekali saat mount
+  }, []);
 
-  // (BARU) Handler saat komponen filter berubah
   const handleFilterChange = (filters) => {
     setActiveFilters(filters);
-    // Saat filter berubah, data akan otomatis di-fetch ulang oleh useEffect di atas
   };
-
-  // --- Handlers (FIX - Menggunakan Modal) ---
   const handleCloseModal = () => {
     setModal({ ...modal, open: false });
   };
-
   const handleCloseToast = (event, reason) => {
-    if (reason === "clickaway") {
-      return;
-    }
+    if (reason === "clickaway") return;
     setErrorToast({ ...errorToast, open: false });
   };
 
@@ -548,16 +511,13 @@ const DashboardPage = () => {
     setModal({
       open: true,
       title: "Terima Pesanan?",
-      content: `Anda yakin ingin menerima pesanan ${grabOrderId}? Stok akan dikurangi.`,
+      content: `Anda yakin ingin menerima pesanan ${grabOrderId}?`,
       onConfirm: async () => {
         try {
           await acceptOrder(grabOrderId);
-          fetchOrders(activeFilters, false); // Panggil ulang (tanpa loading)
+          fetchOrders(activeFilters, false);
         } catch (err) {
-          setErrorToast({
-            open: true,
-            message: `Gagal menerima pesanan: ${err.message}`,
-          });
+          setErrorToast({ open: true, message: err.message });
         }
         handleCloseModal();
       },
@@ -572,12 +532,9 @@ const DashboardPage = () => {
       onConfirm: async () => {
         try {
           await rejectOrder(grabOrderId);
-          fetchOrders(activeFilters, false); // Panggil ulang (tanpa loading)
+          fetchOrders(activeFilters, false);
         } catch (err) {
-          setErrorToast({
-            open: true,
-            message: `Gagal menolak pesanan: ${err.message}`,
-          });
+          setErrorToast({ open: true, message: err.message });
         }
         handleCloseModal();
       },
@@ -588,23 +545,19 @@ const DashboardPage = () => {
     setModal({
       open: true,
       title: "Tandai Siap?",
-      content: `Anda yakin ingin menandai pesanan ${grabOrderId} siap dijemput?`,
+      content: `Pesanan sudah selesai dibungkus dan siap dijemput driver?`,
       onConfirm: async () => {
         try {
           await markOrderReady(grabOrderId);
-          fetchOrders(activeFilters, false); // Panggil ulang (tanpa loading)
+          fetchOrders(activeFilters, false);
         } catch (err) {
-          setErrorToast({
-            open: true,
-            message: `Gagal menandai siap: ${err.message}`,
-          });
+          setErrorToast({ open: true, message: err.message });
         }
         handleCloseModal();
       },
     });
   };
 
-  // --- Helper (Tidak Berubah) ---
   const ordersByTab = {
     ALL: allOrders,
     INCOMING: incomingOrders,
@@ -614,7 +567,6 @@ const DashboardPage = () => {
     DELIVERED: deliveredOrders,
     CANCELLED: cancelledOrders,
   };
-
   const displayedOrders = useMemo(
     () => ordersByTab[activeTab] || [],
     [
@@ -630,128 +582,69 @@ const DashboardPage = () => {
   );
 
   const getTabClass = (tabConfig) => {
-    const isActive = activeTab === tabConfig.apiKey;
-    if (isActive) {
-      return `pb-2 border-b-2 font-semibold ${tabConfig.color}`;
-    } else {
-      return "pb-2 border-b-2 border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700";
-    }
+    return activeTab === tabConfig.apiKey
+      ? `pb-2 border-b-2 font-semibold ${tabConfig.color}`
+      : "pb-2 border-b-2 border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700";
   };
 
-  // --- Logika Statistik (Tidak Berubah) ---
   const totalRevenue = useMemo(() => {
-    const revenue = deliveredOrders.reduce((acc, order) => {
-      const orderTotal = order.grab_payload_raw?.price?.total || 0;
-      return acc + orderTotal;
-    }, 0);
     return new Intl.NumberFormat("id-ID", {
       style: "currency",
       currency: "IDR",
       minimumFractionDigits: 0,
-    }).format(revenue);
+    }).format(
+      deliveredOrders.reduce((acc, order) => {
+        let rawPrice =
+          order.grab_payload_raw?.price?.total ||
+          order.grab_payload_raw?.price?.eaterPayment ||
+          0;
+        if (rawPrice === 0 && order.grab_payload_raw?.items) {
+          // Fallback revenue logic
+          rawPrice = order.grab_payload_raw.items.reduce(
+            (sum, item) => sum + (item.price || 1500000) * item.quantity,
+            0
+          );
+        }
+        return acc + rawPrice / 100;
+      }, 0)
+    );
   }, [deliveredOrders]);
 
-  const totalOrdersToday = allOrders.length;
-  const completedToday = deliveredOrders.length;
-  const activeOrders = preparingOrders.length + readyForPickupOrders.length;
-
-  // --- Fungsi Download CSV (FIX - ganti alert) ---
-  const handleDownloadCSV = () => {
-    if (displayedOrders.length === 0) {
-      setErrorToast({
-        open: true,
-        message: "Tidak ada data untuk di-download.",
-      });
-      return;
-    }
-    const headers = [
-      "Order ID",
-      "Status",
-      "Total (Rp)",
-      "Waktu Masuk",
-      "Items",
-    ];
-    const rows = displayedOrders.map((order) => {
-      const orderId = order.grab_order_id || "N/A";
-      const status = order.status || "N/A";
-      const total = order.grab_payload_raw?.price?.total || 0;
-      const time = new Date(order.created_at).toLocaleString("id-ID");
-      const items = (order.grab_payload_raw?.items || [])
-        .map((item) => `"${item.quantity}x ${item.name.replace(/"/g, '""')}"`)
-        .join("; ");
-      return [orderId, status, total, time, items].join(",");
-    });
-    const csvContent = [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    if (link.download !== undefined) {
-      const url = URL.createObjectURL(blob);
-      link.setAttribute("href", url);
-      link.setAttribute(
-        "download",
-        `report_${activeTab}_${new Date().toISOString().split("T")[0]}.csv`
-      );
-      link.style.visibility = "hidden";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
-  };
-
-  // --- Render ---
   return (
     <div className="p-6 min-h-full">
-      {/* --- Section Header & Overview (Tidak Berubah) --- */}
       <section className="mb-6">
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">
-              Dashboard Overview
-            </h1>
-            <p className="text-sm text-gray-500">
-              Real-time statistics and insights
-            </p>
-          </div>
-          <button
-            onClick={handleDownloadCSV}
-            className="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            Download CSV Report
-          </button>
-        </div>
+        <h1 className="text-3xl font-bold text-gray-900 mb-4">
+          Dashboard Overview
+        </h1>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <OverviewStatCard
             title="Total Revenue"
             value={totalRevenue}
-            detail="From completed orders"
+            detail="Completed Orders"
             iconBgColor="bg-green-100"
             iconColor="text-green-600"
             icon={<FaWallet />}
           />
           <OverviewStatCard
-            title="Total Orders Today"
-            value={totalOrdersToday}
-            detail="All order statuses"
+            title="Total Orders"
+            value={allOrders.length}
+            detail="Today"
             iconBgColor="bg-blue-100"
             iconColor="text-blue-600"
             icon={<FaBox />}
           />
           <OverviewStatCard
-            title="Completed Orders"
-            value={completedToday}
-            detail={`${
-              totalOrdersToday > 0
-                ? Math.round((completedToday / totalOrdersToday) * 100)
-                : 0
-            }% completion rate`}
+            title="Completed"
+            value={deliveredOrders.length}
+            detail="Orders"
             iconBgColor="bg-purple-100"
             iconColor="text-purple-600"
             icon={<FaCheckCircle />}
           />
           <OverviewStatCard
-            title="Active Orders"
-            value={activeOrders}
-            detail="Preparing + Ready for Pickup"
+            title="Active"
+            value={preparingOrders.length + readyForPickupOrders.length}
+            detail="In Progress"
             iconBgColor="bg-orange-100"
             iconColor="text-orange-600"
             icon={<FaSpinner />}
@@ -759,147 +652,85 @@ const DashboardPage = () => {
         </div>
       </section>
 
-      {/* =====================================================
-        (BARU) TAMPILKAN KOMPONEN FILTER DI SINI
-      =====================================================
-      */}
       <DashboardFilters user={user} onFilterChange={handleFilterChange} />
 
-      {/* --- Order Status Breakdown (Tidak Berubah) --- */}
       <section className="mb-6">
         <h2 className="text-xl font-semibold mb-4 text-gray-800">
-          Order Status Breakdown
+          Order Status
         </h2>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-            {TAB_CONFIG.map((tab) => {
-              const colors = cardColors[tab.apiKey] || cardColors.ALL;
-              return (
-                <StatusCard
-                  key={tab.apiKey}
-                  title={tab.label}
-                  count={ordersByTab[tab.apiKey]?.length || 0}
-                  bgColor={colors.bgColor}
-                  textColor={colors.textColor}
-                />
-              );
-            })}
-          </div>
-        </div>
+        <nav className="flex space-x-6 border-b border-gray-200 bg-white p-4 rounded-lg shadow overflow-x-auto">
+          {TAB_CONFIG.map((tab) => (
+            <button
+              key={tab.apiKey}
+              onClick={() => setActiveTab(tab.apiKey)}
+              className={`text-sm md:text-base flex-shrink-0 ${getTabClass(
+                tab
+              )}`}
+            >
+              {tab.label} ({ordersByTab[tab.apiKey]?.length || 0})
+            </button>
+          ))}
+        </nav>
       </section>
 
-      {/* --- Navigasi TAB FILTER (Tidak Berubah) --- */}
-      <nav className="flex space-x-6 border-b border-gray-200 mb-6 bg-white p-4 rounded-lg shadow overflow-x-auto">
-        {TAB_CONFIG.map((tab) => (
-          <button
-            key={tab.apiKey}
-            onClick={() => setActiveTab(tab.apiKey)}
-            className={`text-sm md:text-base flex-shrink-0 ${getTabClass(tab)}`}
-          >
-            {tab.label} ({ordersByTab[tab.apiKey]?.length || 0})
-          </button>
-        ))}
-      </nav>
-
-      {/* --- Bagian Search (Tidak Berubah) --- */}
-      <div className="mb-6 flex gap-4">
-        <input
-          type="text"
-          placeholder="Search by Order ID"
-          className="flex-1 p-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        />
-        <button className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          Search
-        </button>
-      </div>
-
-      {/* --- Daftar Pesanan (Tidak Berubah) --- */}
       <section>
-        <p className="text-gray-600 mb-4">
-          Showing {displayedOrders.length} Results
-        </p>
-
-        {/* (UPDATE) Tampilkan loading spinner jika sedang loading */}
         {loading && (
           <div className="flex justify-center items-center h-64">
             <CircularProgress size={60} />
-            <p className="ml-4 text-lg text-gray-600">Memuat data pesanan...</p>
           </div>
         )}
-
-        {!loading && error && (
-          <p className="text-red-500 text-center">{error}</p>
-        )}
-
-        {!loading && displayedOrders.length === 0 && !error && (
-          <p className="text-gray-500 text-center">
-            Tidak ada pesanan untuk status atau filter ini.
-          </p>
+        {!loading && displayedOrders.length === 0 && (
+          <p className="text-gray-500 text-center py-10">Tidak ada pesanan.</p>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {!loading &&
-            !error &&
             activeTab === "INCOMING" &&
-            displayedOrders.map((order, index) => (
+            displayedOrders.map((order, i) => (
               <OrderCard
-                key={order.grab_order_id || index}
+                key={order.grab_order_id || i}
                 order={order}
                 onAccept={handleAccept}
                 onReject={handleReject}
               />
             ))}
-
           {!loading &&
-            !error &&
             activeTab === "PREPARING" &&
-            displayedOrders.map((order, index) => (
+            displayedOrders.map((order, i) => (
               <PreparingOrderCard
-                key={order.grab_order_id || index}
+                key={order.grab_order_id || i}
                 order={order}
                 onMarkReady={handleMarkReady}
               />
             ))}
-
           {!loading &&
-            !error &&
             activeTab !== "INCOMING" &&
             activeTab !== "PREPARING" &&
-            displayedOrders.map((order, index) => (
-              <SimpleOrderCard
-                key={order.grab_order_id || index}
-                order={order}
-              />
+            displayedOrders.map((order, i) => (
+              <SimpleOrderCard key={order.grab_order_id || i} order={order} />
             ))}
         </div>
       </section>
 
-      {/* (FIX) Modal Konfirmasi */}
       <Dialog open={modal.open} onClose={handleCloseModal}>
         <DialogTitle>{modal.title}</DialogTitle>
         <DialogContent>
           <DialogContentText>{modal.content}</DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseModal} color="primary">
-            Batal
-          </Button>
-          <Button onClick={modal.onConfirm} color="primary" autoFocus>
-            Ya, Lanjutkan
+          <Button onClick={handleCloseModal}>Batal</Button>
+          <Button onClick={modal.onConfirm} autoFocus>
+            Ya
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* (FIX) Toast Notifikasi Error (menggunakan Dialog sederhana) */}
       <Dialog open={errorToast.open} onClose={handleCloseToast}>
         <DialogTitle>Error</DialogTitle>
         <DialogContent>
           <DialogContentText>{errorToast.message}</DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseToast} color="primary" autoFocus>
-            Tutup
-          </Button>
+          <Button onClick={handleCloseToast}>Tutup</Button>
         </DialogActions>
       </Dialog>
     </div>
