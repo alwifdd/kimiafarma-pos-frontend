@@ -240,7 +240,7 @@ const PreparingOrderCard = ({ order, onMarkReady }) => {
   );
 };
 
-// --- KOMPONEN FILTER ---
+// --- KOMPONEN FILTER (Tidak Berubah) ---
 const DashboardFilters = ({ user, onFilterChange }) => {
   const [bmList, setBmList] = useState([]);
   const [branchList, setBranchList] = useState([]);
@@ -599,7 +599,6 @@ const DashboardPage = () => {
           order.grab_payload_raw?.price?.eaterPayment ||
           0;
         if (rawPrice === 0 && order.grab_payload_raw?.items) {
-          // Fallback revenue logic
           rawPrice = order.grab_payload_raw.items.reduce(
             (sum, item) => sum + (item.price || 1500000) * item.quantity,
             0
